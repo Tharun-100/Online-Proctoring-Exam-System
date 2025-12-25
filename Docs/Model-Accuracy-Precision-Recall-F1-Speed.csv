@@ -1,0 +1,5 @@
+"Model","Accuracy","Precision","Recall","F1","Speed"
+"XGBoost","91.5%","92.0%","90.5%","91.25%","Fast ✓"
+"Random Forest","89.5%","89.0%","88.0%","88.5%","Slower"
+"SVM","87.2%","86.5%","87.8%","87.1%","Slowest"
+"Neural Net","88.9%","88.2%","89.4%","88.8%","Med"

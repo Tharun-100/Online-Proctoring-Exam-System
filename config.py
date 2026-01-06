@@ -12,7 +12,7 @@ MODEL_PATH = os.path.join(MODEL_DIR, "xgboost_fraud_detection_model.pkl")
 PREPROCESSOR_PATH = os.path.join(MODEL_DIR, "preprocessor.pkl")
 
 # Training parameters
-TEST_SIZE = 0.2
+TEST_SIZE = 0.3
 RANDOM_STATE = 42
 VALIDATION_SIZE = 0.2  # From training set
 

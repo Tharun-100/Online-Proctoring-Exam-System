@@ -25,7 +25,7 @@ from src.data_preprocessing import load_and_preprocess_data, DataPreprocessor
 
 def train_model():
     """Train XGBoost model for fraud detection"""
-    
+
     print("=" * 60)
     print("Fraud Detection System - Model Training")
     print("=" * 60)
@@ -45,8 +45,11 @@ def train_model():
     
     # Split data
     print("\n[2/5] Splitting data into train/test sets...")
-    X_train, X_test, y_train, y_test = train_test_split(
+    X_train, X_t, y_train, y_t = train_test_split(
         X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+    )
+    X_test,X_valid, y_test, y_valid = train_test_split(
+        X_t, y_t, test_size=0.5, random_state=RANDOM_STATE, stratify=y_t
     )
     
     print(f"   Training set: {X_train.shape[0]} samples")
@@ -68,9 +71,18 @@ def train_model():
     y_train_pred = model.predict(X_train)
     y_test_pred = model.predict(X_test)
     y_test_proba = model.predict_proba(X_test)[:, 1]
-    
+
+    y_valid_pred = model.predict(X_valid)
+    y_valid_proba = model.predict_proba(X_valid)[:, 1]
+
     # Calculate metrics
     train_accuracy = accuracy_score(y_train, y_train_pred)
+    valid_accuracy = accuracy_score(y_valid, y_valid_pred)
+    valid_auc = roc_auc_score(y_valid, y_valid_proba)
+    valid_precision = precision_score(y_valid, y_valid_pred, zero_division=0)
+    valid_recall = recall_score(y_valid, y_valid_pred, zero_division=0)
+    valid_f1 = f1_score(y_valid, y_valid_pred, zero_division=0)
+
     test_accuracy = accuracy_score(y_test, y_test_pred)
     test_precision = precision_score(y_test, y_test_pred, zero_division=0)
     test_recall = recall_score(y_test, y_test_pred, zero_division=0)
@@ -86,11 +98,20 @@ def train_model():
     print(f"Test Recall:        {test_recall:.4f}")
     print(f"Test F1-Score:      {test_f1:.4f}")
     print(f"Test AUC-ROC:       {test_auc:.4f}")
+    
+    print("\nValidation Set Metrics:")
+    
+    print(f"Validation Accuracy:  {valid_accuracy:.4f}")
+    print(f"Validation Precision: {valid_precision:.4f}")
+    print(f"Validation Recall:    {valid_recall:.4f}")
+    print(f"Validation F1-Score:  {valid_f1:.4f}")
+    print(f"Validation AUC-ROC:   {valid_auc:.4f}")
+
     print("\nClassification Report (Test Set):")
     print(classification_report(y_test, y_test_pred, target_names=['Legitimate', 'Fraud']))
     print("\nConfusion Matrix (Test Set):")
     print(confusion_matrix(y_test, y_test_pred))
-    
+
     # Save model and preprocessor
     print("\n[5/5] Saving model and preprocessor...")
     os.makedirs(MODEL_DIR, exist_ok=True)
@@ -105,8 +126,10 @@ def train_model():
     metrics_df = pd.DataFrame({
         'Metric': ['Accuracy', 'Precision', 'Recall', 'F1-Score', 'AUC-ROC'],
         'Train': [train_accuracy, None, None, None, None],
-        'Test': [test_accuracy, test_precision, test_recall, test_f1, test_auc]
+        'Test': [test_accuracy, test_precision, test_recall, test_f1, test_auc],
+        'Validation': [valid_accuracy, valid_precision, valid_recall, valid_f1, valid_auc]
     })
+
     metrics_path = os.path.join(MODEL_DIR, 'model_metrics.csv')
     metrics_df.to_csv(metrics_path, index=False)
     print(f"   Metrics saved to: {metrics_path}")

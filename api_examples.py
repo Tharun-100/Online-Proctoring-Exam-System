@@ -21,7 +21,7 @@ def example_image_upload():
         with open(image_path, 'rb') as f:
             files = {'image': f}
             response = requests.post(f"{BASE_URL}/predict/image", files=files)
-        
+            
         if response.status_code == 200:
             result = response.json()
             print(f"✓ Prediction: {result['prediction']['prediction_label']}")
@@ -108,7 +108,6 @@ def example_batch_prediction():
     print("\n" + "=" * 60)
     print("Example 3: Batch Prediction")
     print("=" * 60)
-    
     # Multiple feature sets
     feature_sets = [
         {

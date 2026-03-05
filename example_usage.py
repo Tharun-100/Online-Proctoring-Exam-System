@@ -3,13 +3,21 @@ Example usage script for Fraud Detection System
 """
 import pandas as pd
 from src.inference import FraudDetectionInference
+from src.feature_extraction import FeatureExtractor 
+import cv2
 
-# Example: Load inference pipeline and make predictions
+image_path = r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\Example Images\Test Images.jpg"   # put any face image here
+
+
 if __name__ == "__main__":
     print("Fraud Detection System - Example Usage")
     print("=" * 60)
-    
-    # Load inference pipeline (model must be trained first)
+    image = cv2.imread(image_path)
+    print("Image shape:", None if image is None else image.shape)
+    extractor = FeatureExtractor()
+    print("Extractor initialized:", extractor)
+    features = extractor.extract_features(image)
+
     try:
         inference = FraudDetectionInference()
         print("✓ Model loaded successfully\n")
@@ -17,8 +25,7 @@ if __name__ == "__main__":
         print(f"✗ Error: {e}")
         print("Please train the model first by running: python src/train.py")
         exit(1)
-    
-    # Example 1: Single prediction with sample data
+
     print("Example 1: Single Prediction")
     print("-" * 60)
     
@@ -61,8 +68,8 @@ if __name__ == "__main__":
         'pupil_right_x': 368,
         'pupil_right_y': 354
     }
-    
-    result = inference.predict(sample_data)
+
+    result = inference.predict(features) # replaced with sample_data: because features may not be available
     print(f"Prediction: {result['prediction_label']}")
     print(f"Fraud Probability: {result['fraud_probability']:.4f}")
     print(f"Legitimate Probability: {result['legitimate_probability']:.4f}")

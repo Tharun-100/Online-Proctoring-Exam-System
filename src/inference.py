@@ -61,14 +61,14 @@ class FraudDetectionInference:
             data = pd.DataFrame(data)
         elif not isinstance(data, pd.DataFrame):
             raise ValueError("Input must be a DataFrame, dict, or list of dicts")
-        
+
         # Preprocess data
         X = self.preprocessor.transform(data)
-        
+
         # Make predictions
         predictions = self.model.predict(X)
         probabilities = self.model.predict_proba(X)
-        
+
         # Format results
         results = []
         for i in range(len(predictions)):
@@ -79,7 +79,7 @@ class FraudDetectionInference:
                 'legitimate_probability': float(probabilities[i][0])
             }
             results.append(result)
-        
+
         # Return single result if single input, else list
         if len(results) == 1:
             return results[0]

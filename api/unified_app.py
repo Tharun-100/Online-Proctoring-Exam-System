@@ -65,7 +65,7 @@ def generate_classification_report(prediction_result: dict) -> str:
     label = prediction_result['prediction_label']
     fraud_prob = prediction_result['fraud_probability']
     legit_prob = prediction_result['legitimate_probability']
-    
+
     report = f"""
 === CLASSIFICATION REPORT ===
 

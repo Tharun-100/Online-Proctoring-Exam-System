@@ -1,6 +1,6 @@
 import cv2
 import pprint
-from feature_extraction import FeatureExtractor  # adjust filename if needed
+from feature_extraction import FeatureExtractor  
 print("TEST SCRIPT STARTED")
 
 def main():
@@ -13,17 +13,18 @@ def main():
     print("Image shape:", None if image is None else image.shape)
 
 
-    if image is None:
-        raise FileNotFoundError(f"Could not load image: {image_path}")
-    # print("FeatureExtractor imported from:", FeatureExtractor)
+    # if image is None:
+    #     raise FileNotFoundError(f"Could not load image: {image_path}")
+    # # print("FeatureExtractor imported from:", FeatureExtractor)
 
     extractor = FeatureExtractor()
-    print("FeatureExtractor imported from:", FeatureExtractor)
+    # print("FeatureExtractor imported from:", FeatureExtractor)
+    print("Extractor initialized:", extractor)
     features = extractor.extract_features(image)
 
     print("\n===== EXTRACTED FEATURES =====")
     pprint.pprint(features)
-
+    
     annotated = extractor.draw_annotations(image, features)
 
     cv2.imshow("Feature Extractor Output", annotated)

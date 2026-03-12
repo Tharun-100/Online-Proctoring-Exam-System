@@ -20,9 +20,9 @@ class DataPreprocessor:
         self.is_fitted = False
         
     def fit_transform(self, df, target_column='label'):
+
         """
         Fit preprocessor and transform data
-        
         Args:
             df: DataFrame with features and target
             target_column: Name of target column
@@ -30,12 +30,13 @@ class DataPreprocessor:
         Returns:
             Tuple of (X, y) where X is features and y is target
         """
+
         df = df.copy()
-        
+
         # Separate features and target
         y = df[target_column].copy()
         X = df.drop(columns=[target_column])
-        
+
         # Handle categorical columns
         for col in self.categorical_columns:
             if col in X.columns:
@@ -52,7 +53,7 @@ class DataPreprocessor:
                     default_class = self.label_encoders[col].classes_[0]
                     X[col] = X[col].apply(lambda x: x if x in known_classes else default_class)
                     X[col] = self.label_encoders[col].transform(X[col])
-        
+
         # Handle missing values in numerical columns
         X_numeric = X.select_dtypes(include=[np.number])
         X_numeric_imputed = self.imputer.fit_transform(X_numeric)
@@ -64,7 +65,6 @@ class DataPreprocessor:
         
         self.is_fitted = True
         self.feature_columns = list(X.columns)
-        
         return X, y
     
     def transform(self, df, target_column=None):

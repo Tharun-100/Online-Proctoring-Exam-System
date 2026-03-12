@@ -4,6 +4,7 @@ Training script for XGBoost Fraud Detection Model
 import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
+
 from sklearn.metrics import (
     accuracy_score, precision_score, recall_score, f1_score,
     roc_auc_score, classification_report, confusion_matrix
@@ -30,7 +31,7 @@ def train_model():
     print("=" * 60)
     print("Fraud Detection System - Model Training")
     print("=" * 60)
-    
+
     # Load and preprocess data
     print("\n[1/5] Loading and preprocessing data...")
     X, y, preprocessor = load_and_preprocess_data(
@@ -107,7 +108,7 @@ def train_model():
     print(f"Validation Recall:    {valid_recall:.4f}")
     print(f"Validation F1-Score:  {valid_f1:.4f}")
     print(f"Validation AUC-ROC:   {valid_auc:.4f}")
-
+    
     print("\nClassification Report (Test Set):")
     print(classification_report(y_test, y_test_pred, target_names=['Legitimate', 'Fraud']))
     print("\nConfusion Matrix (Test Set):")

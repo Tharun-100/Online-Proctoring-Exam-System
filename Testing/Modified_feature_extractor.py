@@ -437,9 +437,7 @@ class FeatureExtractor:
         return features
     
     def _detect_phone(self, image: np.ndarray) -> Dict:
-        """Detect phone in image (placeholder - would need YOLO or similar)"""
-        # This is a placeholder - in production, you'd use an object detection model
-        # For now, return default values
+        """Detect phone in image using YOLO results from self.phone_model."""
         features = {
             'phone_present': 0,
             'phone_loc_x': 0,
@@ -447,19 +445,71 @@ class FeatureExtractor:
             'phone_conf': 0
         }
         # Using YOLO Models:
-        results = self.phone_model(image)
+        phone_feats = {}
+
+        if not hasattr(self, 'phone_model') or self.phone_model is None:
+            return features
+
+        try:
+            results = self.phone_model.predict(image, conf=0.5, verbose=False)
+        except TypeError:
+            results = self.phone_model(image)
+        except Exception:
+            return features
+
+        # Determine phone class ids
+        phone_class_ids = None
+        if hasattr(self, 'phone_class_id'):
+            phone_class_ids = {int(self.phone_class_id)}
+        else:
+            model_names = getattr(self.phone_model, 'names', None)
+            name_map = None
+            if isinstance(model_names, (list, tuple)):
+                name_map = {i: n for i, n in enumerate(model_names)}
+            elif isinstance(model_names, dict):
+                name_map = model_names
+
+            if name_map:
+                if len(name_map) == 1:
+                    phone_class_ids = set(name_map.keys())
+                else:
+                    phone_terms = ('phone', 'cell', 'mobile')
+                    phone_ids = [
+                        i for i, n in name_map.items()
+                        if isinstance(n, str) and any(t in n.lower() for t in phone_terms)
+                    ]
+                    if phone_ids:
+                        phone_class_ids = set(phone_ids)
+                    elif 67 in name_map:
+                        # COCO "cell phone"
+                        phone_class_ids = {67}
+
+        best = None  # (conf, x1, y1, x2, y2)
         for result in results:
-            if result.boxes is None:
+            boxes = getattr(result, 'boxes', None)
+            if boxes is None or len(boxes) == 0:
                 continue
-            for box in result.boxes:
-                cls = int(box.cls[0])
-                if cls == 67:
-                    features['phone_present'] = 1
+            for box in boxes:
+                cls_id = int(box.cls[0])
+                if phone_class_ids is not None and cls_id not in phone_class_ids:
+                    continue
+                conf = float(box.conf[0])
+                if best is None or conf > best[0]:
                     x1, y1, x2, y2 = box.xyxy[0]
-                    features['phone_loc_x'] = int((x1 + x2) / 2)
-                    features['phone_loc_y'] = int((y1 + y2) / 2)
-                    features['phone_conf'] = float(box.conf[0])
-                    return features # Return on first detected phone
+                    best = (conf, x1, y1, x2, y2)
+
+        if best is not None:
+            conf, x1, y1, x2, y2 = best
+            features['phone_present'] = 1
+            phone_feats['phone_x1'] = int(x1)
+            phone_feats['phone_y1'] = int(y1)
+            phone_feats['phone_x2'] = int(x2)
+            phone_feats['phone_y2'] = int(y2)
+            phone_feats['phone_present'] = 1
+            features['phone_loc_x'] = int((x1 + x2) / 2)
+            features['phone_loc_y'] = int((y1 + y2) / 2)
+            features['phone_conf'] = float(conf)
+            self.phone_features = phone_feats
         return features
     
     def _get_landmark_center(self, landmarks, landmark_indices: list, width: int, height: int) -> Tuple[float, float]:

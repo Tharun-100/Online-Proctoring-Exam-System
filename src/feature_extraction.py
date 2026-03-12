@@ -83,7 +83,7 @@ class FeatureExtractor:
             pose_landmarker_options
         )
         # ---------- Phone Detector (YOLO) ----------
-        self.phone_model = YOLO(os.path.join(model_dir, "yolov8n.pt"))  # COCO class 67 = cellphone
+        self.phone_model = YOLO(os.path.join(model_dir, "yolov8n-mobile-phone.pt"))  # Mobile Detection Model for Phones
         self.phone_features={}
 
     def extract_features(self, image: np.ndarray) -> Dict:
@@ -100,7 +100,7 @@ class FeatureExtractor:
         rgb_image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
         height, width = image.shape[:2]
-
+        
         # Initialize default feature values
         features = self._get_default_features()
         # Extract face features
@@ -526,7 +526,6 @@ class FeatureExtractor:
         """Detect phone in image (placeholder - would need YOLO or similar)"""
         # This is a placeholder - in production, you'd use an object detection model
         # For now, return default values
-
         features = {
             'phone_present': 0,
             'phone_loc_x': 0,
@@ -536,26 +535,45 @@ class FeatureExtractor:
 
         # Using YOLO Models:
         phone_feats={}
+        #  self model :--->
+        results = self.phone_model(image, conf=0.5)  # Adjust confidence threshold as needed
         
-        results = self.phone_model(image)
-        for result in results:
-            if result.boxes is None:
-                continue
-            for box in result.boxes:
-                cls = int(box.cls[0])
-                if cls == 67:
-                    features['phone_present'] = 1
-                    x1, y1, x2, y2 = box.xyxy[0]
-                    phone_feats['phone_x1'] = int(x1)
-                    phone_feats['phone_y1'] = int(y1)
-                    phone_feats['phone_x2'] = int(x2)
-                    phone_feats['phone_y2'] = int(y2)
-                    phone_feats['phone_present'] = 1
-                    features['phone_loc_x'] = int((x1 + x2) / 2)
-                    features['phone_loc_y'] = int((y1 + y2) / 2)
-                    features['phone_conf'] = float(box.conf[0])
-                    self.phone_features = phone_feats
-                    return features # Return on first detected phone
+        if results and results[0].boxes is not None:
+            for b in results[0].boxes:
+                # cls = int(b.cls[0])
+                conf= float(b.conf[0])
+                x1, y1, x2, y2 = b.xyxy[0].tolist()  # Get bounding box coordinates
+                features['phone_present'] = 1
+                phone_feats['phone_x1'] = int(x1)
+                phone_feats['phone_y1'] = int(y1)
+                phone_feats['phone_x2'] = int(x2)
+                phone_feats['phone_y2'] = int(y2)
+                phone_feats['phone_present'] = 1
+                features['phone_loc_x'] = int((x1 + x2) / 2)
+                features['phone_loc_y'] = int((y1 + y2) / 2)
+                features['phone_conf'] = conf
+                self.phone_features = phone_feats
+                return features
+
+        # results = self.phone_model(image)
+        # for result in results:
+        #     if result.boxes is None:
+        #         continue
+        #     for box in result.boxes:
+        #         cls = int(box.cls[0])
+        #         if cls == 67:
+        #             features['phone_present'] = 1
+        #             x1, y1, x2, y2 = box.xyxy[0]
+        #             phone_feats['phone_x1'] = int(x1)
+        #             phone_feats['phone_y1'] = int(y1)
+        #             phone_feats['phone_x2'] = int(x2)
+        #             phone_feats['phone_y2'] = int(y2)
+        #             phone_feats['phone_present'] = 1
+        #             features['phone_loc_x'] = int((x1 + x2) / 2)
+        #             features['phone_loc_y'] = int((y1 + y2) / 2)
+        #             features['phone_conf'] = float(box.conf[0])
+        #             self.phone_features = phone_feats
+        #             return features # Return on first detected phone
         return features
     
     def _get_landmark_center(self, landmarks, landmark_indices: list, width: int, height: int) -> Tuple[float, float]:

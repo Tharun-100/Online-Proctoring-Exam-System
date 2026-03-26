@@ -3,21 +3,33 @@ Data Preprocessing Module for Fraud Detection System
 """
 import pandas as pd
 import numpy as np
-from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 from sklearn.impute import SimpleImputer
 import joblib
 import os
 
-
 class DataPreprocessor:
     """Class to handle data preprocessing and feature engineering"""
-    
-    def __init__(self):
-        self.label_encoders = {}
+
+    def __init__(self, categorical_columns=None, auto_detect_categoricals=True):
+        self.one_hot_encoder = None
         self.scaler = StandardScaler()
         self.imputer = SimpleImputer(strategy='median')
-        self.categorical_columns = ['head_pose', 'gaze_direction']
+        self.categorical_columns = list(categorical_columns) if categorical_columns else None
+        self.auto_detect_categoricals = auto_detect_categoricals
         self.is_fitted = False
+
+    def _resolve_categorical_columns(self, X):
+        cat_cols = []
+        if self.categorical_columns:
+            cat_cols = [col for col in self.categorical_columns if col in X.columns]
+        if self.auto_detect_categoricals:
+            detected = X.select_dtypes(include=['object', 'category']).columns.tolist()
+            for col in detected:
+                if col not in cat_cols:
+                    cat_cols.append(col)
+        self.categorical_columns = cat_cols
+        return cat_cols
         
     def fit_transform(self, df, target_column='label'):
 
@@ -37,31 +49,28 @@ class DataPreprocessor:
         y = df[target_column].copy()
         X = df.drop(columns=[target_column])
 
-        # Handle categorical columns
-        for col in self.categorical_columns:
-            if col in X.columns:
-                # Fill missing values with 'Unknown'
-                X[col] = X[col].fillna('Unknown')
-                # Encode categorical variables
-                if col not in self.label_encoders:
-                    self.label_encoders[col] = LabelEncoder()
-                    X[col] = self.label_encoders[col].fit_transform(X[col].astype(str))
-                else:
-                    # Handle unseen categories during transform (shouldn't happen in fit_transform, but safe guard)
-                    X[col] = X[col].astype(str)
-                    known_classes = set(self.label_encoders[col].classes_)
-                    default_class = self.label_encoders[col].classes_[0]
-                    X[col] = X[col].apply(lambda x: x if x in known_classes else default_class)
-                    X[col] = self.label_encoders[col].transform(X[col])
+        # Keep track of numeric columns (exclude categoricals)
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+
+        # Handle categorical columns with one-hot encoding
+        cat_cols = self._resolve_categorical_columns(X)
+        if cat_cols:
+            X[cat_cols] = X[cat_cols].fillna('Unknown').astype(str)
+            self.one_hot_encoder = OneHotEncoder(handle_unknown='ignore', sparse_output=False)
+            cat_array = self.one_hot_encoder.fit_transform(X[cat_cols])
+            cat_feature_names = self.one_hot_encoder.get_feature_names_out(cat_cols)
+            X_cat = pd.DataFrame(cat_array, columns=cat_feature_names, index=X.index)
+            X = X.drop(columns=cat_cols)
+            X = pd.concat([X, X_cat], axis=1)
 
         # Handle missing values in numerical columns
-        X_numeric = X.select_dtypes(include=[np.number])
+        X_numeric = X[numeric_cols] if numeric_cols else X.select_dtypes(include=[np.number])
         X_numeric_imputed = self.imputer.fit_transform(X_numeric)
         X[X_numeric.columns] = X_numeric_imputed
         
-        # Scale numerical features
-        X_scaled = self.scaler.fit_transform(X.select_dtypes(include=[np.number]))
-        X[X.select_dtypes(include=[np.number]).columns] = X_scaled
+        # Scale numerical features (after imputation)
+        X_scaled = self.scaler.fit_transform(X_numeric_imputed)
+        X[X_numeric.columns] = X_scaled
         
         self.is_fitted = True
         self.feature_columns = list(X.columns)
@@ -70,11 +79,11 @@ class DataPreprocessor:
     def transform(self, df, target_column=None):
         """
         Transform new data using fitted preprocessor
-        
+
         Args:
             df: DataFrame to transform
             target_column: Optional target column to separate
-            
+
         Returns:
             Transformed features (and target if target_column is provided)
         """
@@ -91,28 +100,27 @@ class DataPreprocessor:
         else:
             X = df
         
-        # Handle categorical columns
-        for col in self.categorical_columns:
-            if col in X.columns:
-                # Fill missing values with 'Unknown'
-                X[col] = X[col].fillna('Unknown')
-                # Transform categorical variables
-                if col in self.label_encoders:
-                    X[col] = X[col].astype(str)
-                    known_classes = set(self.label_encoders[col].classes_)
-                    # Map unseen categories to the first known class (or most common)
-                    default_class = self.label_encoders[col].classes_[0]
-                    X[col] = X[col].apply(lambda x: x if x in known_classes else default_class)
-                    X[col] = self.label_encoders[col].transform(X[col])
+        # Keep track of numeric columns (exclude categoricals)
+        numeric_cols = X.select_dtypes(include=[np.number]).columns.tolist()
+
+        # Handle categorical columns with one-hot encoding
+        cat_cols = [col for col in (self.categorical_columns or []) if col in X.columns]
+        if cat_cols and self.one_hot_encoder is not None:
+            X[cat_cols] = X[cat_cols].fillna('Unknown').astype(str)
+            cat_array = self.one_hot_encoder.transform(X[cat_cols])
+            cat_feature_names = self.one_hot_encoder.get_feature_names_out(cat_cols)
+            X_cat = pd.DataFrame(cat_array, columns=cat_feature_names, index=X.index)
+            X = X.drop(columns=cat_cols)
+            X = pd.concat([X, X_cat], axis=1)
         
         # Handle missing values in numerical columns
-        X_numeric = X.select_dtypes(include=[np.number])
+        X_numeric = X[numeric_cols] if numeric_cols else X.select_dtypes(include=[np.number])
         X_numeric_imputed = self.imputer.transform(X_numeric)
         X[X_numeric.columns] = X_numeric_imputed
         
-        # Scale numerical features
-        X_scaled = self.scaler.transform(X.select_dtypes(include=[np.number]))
-        X[X.select_dtypes(include=[np.number]).columns] = X_scaled
+        # Scale numerical features (after imputation)
+        X_scaled = self.scaler.transform(X_numeric_imputed)
+        X[X_numeric.columns] = X_scaled
         
         # Ensure same column order as training
         if hasattr(self, 'feature_columns'):
@@ -126,10 +134,11 @@ class DataPreprocessor:
         """Save preprocessor to disk"""
         os.makedirs(os.path.dirname(filepath), exist_ok=True)
         joblib.dump({
-            'label_encoders': self.label_encoders,
+            'one_hot_encoder': self.one_hot_encoder,
             'scaler': self.scaler,
             'imputer': self.imputer,
             'categorical_columns': self.categorical_columns,
+            'auto_detect_categoricals': self.auto_detect_categoricals,
             'feature_columns': getattr(self, 'feature_columns', None),
             'is_fitted': self.is_fitted
         }, filepath)
@@ -139,16 +148,24 @@ class DataPreprocessor:
         """Load preprocessor from disk"""
         data = joblib.load(filepath)
         preprocessor = cls()
-        preprocessor.label_encoders = data['label_encoders']
+        preprocessor.one_hot_encoder = data.get('one_hot_encoder', None)
         preprocessor.scaler = data['scaler']
         preprocessor.imputer = data['imputer']
         preprocessor.categorical_columns = data['categorical_columns']
+        preprocessor.auto_detect_categoricals = data.get('auto_detect_categoricals', True)
         preprocessor.feature_columns = data.get('feature_columns', None)
         preprocessor.is_fitted = data['is_fitted']
         return preprocessor
 
 
-def load_and_preprocess_data(data_path, preprocessor=None, target_column='label', fit_preprocessor=True):
+def load_and_preprocess_data(
+    data_path,
+    preprocessor=None,
+    target_column='label',
+    fit_preprocessor=True,
+    categorical_columns=None,
+    auto_detect_categoricals=True
+):
     """
     Load and preprocess data
     
@@ -157,7 +174,7 @@ def load_and_preprocess_data(data_path, preprocessor=None, target_column='label'
         preprocessor: Optional preprocessor instance
         target_column: Name of target column
         fit_preprocessor: Whether to fit preprocessor (True for training, False for inference)
-        
+
     Returns:
         Tuple of (X, y, preprocessor)
     """
@@ -166,8 +183,11 @@ def load_and_preprocess_data(data_path, preprocessor=None, target_column='label'
     
     # Initialize preprocessor if not provided
     if preprocessor is None:
-        preprocessor = DataPreprocessor()
-    
+        preprocessor = DataPreprocessor(
+            categorical_columns=categorical_columns,
+            auto_detect_categoricals=auto_detect_categoricals
+        )
+
     # Preprocess data
     if fit_preprocessor:
         X, y = preprocessor.fit_transform(df, target_column=target_column)
@@ -175,4 +195,3 @@ def load_and_preprocess_data(data_path, preprocessor=None, target_column='label'
         X, y = preprocessor.transform(df, target_column=target_column)
     
     return X, y, preprocessor
-

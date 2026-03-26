@@ -51,7 +51,7 @@ Target variable: `label` (0 = Legitimate, 1 = Fraud)
 
 1. Clone or navigate to the project directory:
 ```bash
-cd "E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS"
+cd "FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS"
 ```
 
 2. Install required dependencies:
@@ -301,4 +301,3 @@ Edit `config.py` to customize:
 ## License
 
 This project is for educational and research purposes.
-

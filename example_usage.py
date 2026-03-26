@@ -5,14 +5,16 @@ import pandas as pd
 from src.inference import FraudDetectionInference
 from src.feature_extraction import FeatureExtractor 
 import cv2
+from pathlib import Path
 
-image_path = r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\Example Images\Test Images.jpg"   # put any face image here
+BASE_DIR = Path(__file__).resolve().parent
+image_path = BASE_DIR / "Example Images" / "Test Images.jpg"   # put any face image here
 
 
 if __name__ == "__main__":
     print("Fraud Detection System - Example Usage")
     print("=" * 60)
-    image = cv2.imread(image_path)
+    image = cv2.imread(str(image_path))
     print("Image shape:", None if image is None else image.shape)
     extractor = FeatureExtractor()
     print("Extractor initialized:", extractor)

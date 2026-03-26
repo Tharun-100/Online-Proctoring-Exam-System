@@ -84,9 +84,9 @@ Interpretation:
     else:
         report += "  ✓  LEGITIMATE - No suspicious behavior detected.\n"
         report += "     The exam session appears normal.\n"
-    
+
     report += "\n=== END REPORT ==="
-    
+
     return report
 
 
@@ -129,7 +129,7 @@ def health():
 def predict_from_image():
     """
     Handle image upload, extract features, and make prediction
-    
+
     Accepts: multipart/form-data with 'image' file
     Returns: JSON with prediction, classification report, annotated image, and extracted features
     """

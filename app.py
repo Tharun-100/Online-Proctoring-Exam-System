@@ -1,12 +1,17 @@
-import cv2
-import numpy as np
-import xgboost as xgb
-import mediapipe as mp
+import base64
+import os
+import pickle
 from dataclasses import dataclass
 from enum import Enum
-from typing import List, Tuple
-import pickle
-import matplotlib.pyplot as plt
+from typing import List, Optional, Tuple
+
+import cv2
+import numpy as np
+from flask import Flask, jsonify, render_template_string, request
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+
+from config import MODEL_PATH
 from src.feature_extraction import FeatureExtractor
 from src.inference import FraudDetectionInference
 
@@ -41,180 +46,119 @@ class ExamReport:
     recommendation: str
 
 # ============================================================================
-# 3. VIDEO PROCESSING PIPELINE
+# 2. VIDEO PROCESSING PIPELINE
 # ============================================================================
 
 class VideoProcessor:
-    """Process video file: extract frames, features, and XGBoost predictions."""
-    
-    def __init__(self, xgb_model_path: str):
-        """
-        Initialize with trained XGBoost model.
+    """Process video file: extract frames, features, and fraud predictions."""
 
-        Args:
-            xgb_model_path: Path to trained XGBoost model (pickle file)
-        """
+    def __init__(self, xgb_model_path: Optional[str] = None):
         self.feature_extractor = FeatureExtractor()
+        # Load XGBoost model (kept for consistency with training artifacts)
+        model_path = xgb_model_path or MODEL_PATH
+        if os.path.exists(model_path):
+            with open(model_path, "rb") as f:
+                self.xgb_model = pickle.load(f)
+            print(f"Loaded XGBoost model from {model_path}")
+        else:
+            self.xgb_model = None
+            print(f"Warning: XGBoost model not found at {model_path}")
 
-        # Load XGBoost model
-        with open(xgb_model_path, 'rb') as f:
-            self.xgb_model = pickle.load(f)
-
-        print(f"✓ Loaded XGBoost model from {xgb_model_path}")
-        
     def process_video(
         self,
         video_path: str,
         exam_id: str = "exam_001",
         fps_sample: int = 1,
-        max_frames: int = None
+        max_frames: Optional[int] = None,
     ) -> Tuple[List[FrameAnalysis], ExamReport]:
-        """
-        Process entire video and generate fraud detection report.
-
-        Args:
-            video_path: Path to exam video file
-            exam_id: Identifier for this exam
-            fps_sample: Process every Nth frame (1=all, 2=every 2nd, etc.)
-            max_frames: Maximum frames to process (None=all)
-        
-        Returns:
-            frame_analyses: List of FrameAnalysis objects
-            report: ExamReport with fraud detection results
-        """
-
-        print(f"\n{'='*80}")
-        print("STARTING VIDEO PROCESSING")
-        print(f"{'='*80}")
-        print(f"Video: {video_path}")
-        print(f"Exam ID: {exam_id}")
-        
-        # Open video
+        """Process a video and generate a fraud detection report."""
         cap = cv2.VideoCapture(video_path)
         if not cap.isOpened():
             raise ValueError(f"Cannot open video: {video_path}")
-        # Get video properties
-        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        print(f"Total frames in video: {total_frames}")
-        
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
-        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-        
-        print(f"Total frames: {total_frames}")
-        print(f"FPS: {fps}")
-        print(f"Resolution: {width}x{height}")
 
-        frame_analyses = []
+        fps = cap.get(cv2.CAP_PROP_FPS) or 1.0
+        frame_analyses: List[FrameAnalysis] = []
         frame_count = 0
         processed_count = 0
+        inference = FraudDetectionInference()
 
-        print(f"\n{'='*80}")
-        print("PROCESSING FRAMES...")
-        print(f"{'='*80}")
-        try:
-            inference = FraudDetectionInference()
-            print("✓ Model loaded successfully\n")            
-        except FileNotFoundError as e:
-            print(f"✗ Error: {e}")
-            print("Please train the model first by running: python src/train.py")
-            exit(1)
-        
         while True:
             ret, frame = cap.read()
-            print("Reading frame:",frame_count)
             if not ret:
                 break
             frame_count += 1
-            # Sample frames: Basically we are skipping frames based on fps_sample value
-            
+
             if frame_count % fps_sample != 0:
                 continue
-
-            if max_frames and processed_count >= max_frames: # Limit frames for testing
+            if max_frames and processed_count >= max_frames:
                 break
 
-            # Extract features
             features = self.feature_extractor.extract_features(frame)
-            
             result = inference.predict(features)
-            xgb_prob = result['fraud_probability']
-            print(f"Prediction Score: {result['fraud_probability']:.4f}")
+            xgb_prob = result["fraud_probability"]
 
-            # Store analysis
-
-            timestamp = frame_count/fps # store the information
-
+            timestamp = frame_count / fps
             frame_analyses.append(
                 FrameAnalysis(
                     frame_id=frame_count,
                     timestamp=timestamp,
                     exam_id=exam_id,
                     xgboost_probability=float(xgb_prob),
-                    frame_image=frame.copy()
+                    frame_image=frame.copy(),
                 )
             )
-
             processed_count += 1
-            print("Frame ID:",frame_count)
-            print("Timestamp:",timestamp)
-            print("processed_count:",processed_count)
-            # Progress
-            if processed_count % 30 == 0: # this is for the last frame
-                print(f"Processed {processed_count} frames... " f"(Frame {frame_count}/{total_frames}, "f"Last score: {xgb_prob:.4f})")
-        # why it is not reaching to this point:
-        # breaking point?
-        print("Finished processing all frames.")
+
         cap.release()
-        print(f"\n✓ Processed {processed_count} frames")
-        # Generate report
         report = self._generate_report(frame_analyses, exam_id)
         return frame_analyses, report
-    
-    def _generate_report(
-        self,
-        frame_analyses: List[FrameAnalysis],
-        exam_id: str
-    ) -> ExamReport:
-        """Generate fraud detection report."""
 
+    def _generate_report(
+        self, frame_analyses: List[FrameAnalysis], exam_id: str
+    ) -> ExamReport:
         probs = [f.xgboost_probability for f in frame_analyses]
-        peak_score = max(probs)
-        peak_frame_idx = probs.index(peak_score)
-        peak_frame = frame_analyses[peak_frame_idx]
-        # Classify risk
+        if probs:
+            peak_score = max(probs)
+            peak_frame_idx = probs.index(peak_score)
+            peak_frame = frame_analyses[peak_frame_idx]
+        else:
+            peak_score = 0.0
+            peak_frame = FrameAnalysis(
+                frame_id=0,
+                timestamp=0.0,
+                exam_id=exam_id,
+                xgboost_probability=0.0,
+                frame_image=None,
+            )
+
         if peak_score >= 0.90:
             risk_level = RiskLevel.CRITICAL
             recommendation = (
-                "🚨 CRITICAL FRAUD RISK: Exam shows severe suspicious indicators. "
-                "RECOMMEND: Immediately investigate and consider invalidating exam."
+                "CRITICAL FRAUD RISK: Severe suspicious indicators detected. "
+                "Recommend immediate investigation."
             )
         elif peak_score >= 0.75:
             risk_level = RiskLevel.HIGH
             recommendation = (
-                "⚠️ HIGH FRAUD RISK: Significant suspicious behavior detected. "
-                "RECOMMEND: Manual review by proctor, consider re-exam."
+                "HIGH FRAUD RISK: Significant suspicious behavior detected. "
+                "Recommend manual review by proctor."
             )
         elif peak_score >= 0.50:
             risk_level = RiskLevel.MODERATE
             recommendation = (
                 "MODERATE RISK: Some suspicious indicators present. "
-                "RECOMMEND: Monitor future exams."
+                "Recommend monitoring."
             )
         elif peak_score >= 0.30:
             risk_level = RiskLevel.LOW
             recommendation = (
-                "✓ LOW RISK: Minor anomalies detected but within normal range. "
-                "RECOMMEND: No action required."
+                "LOW RISK: Minor anomalies detected but within normal range."
             )
         else:
             risk_level = RiskLevel.MINIMAL
-            recommendation = (
-                "MINIMAL RISK: Exam appears legitimate. "
-                "RECOMMEND: Proceed with confidence."
-            )
-        
-        report = ExamReport(
+            recommendation = "MINIMAL RISK: Exam appears legitimate."
+
+        return ExamReport(
             exam_id=exam_id,
             peak_score=round(peak_score, 4),
             risk_level=risk_level,
@@ -222,191 +166,440 @@ class VideoProcessor:
             peak_frame_timestamp=round(peak_frame.timestamp, 2),
             peak_frame_image=peak_frame.frame_image,
             total_frames=len(frame_analyses),
-            recommendation=recommendation
+            recommendation=recommendation,
         )
-        
-        return report
+    
 
-# ============================================================================
-# 4. REPORT DISPLAY & VISUALIZATION
-# ============================================================================
-
-def display_report(report: ExamReport, frame_analyses: List[FrameAnalysis]):
-    """Display comprehensive fraud detection report."""
-    
-    print(f"\n{'='*80}")
-    print("EXAM FRAUD DETECTION REPORT")
-    print(f"{'='*80}\n")
-    
-    print(f"Exam ID:                    {report.exam_id}")
-    print(f"Peak Suspicious Score:      {report.peak_score:.4f}")
-    print(f"Risk Level:                 {report.risk_level.value}")
-    print(f"Total Frames Analyzed:      {report.total_frames}")
-    print(f"\nMost Suspicious Frame:")
-    print(f"  - Frame ID:               {report.peak_frame_id}")
-    print(f"  - Timestamp:              {report.peak_frame_timestamp}s")
-    print(f"\nRecommendation:")
-    print(f"  {report.recommendation}")
-    
-    print(f"\n{'='*80}")
-    print("SCORE DISTRIBUTION")
-    print(f"{'='*80}\n")
-    
+def _build_report_payload(report: ExamReport, frame_analyses: List[FrameAnalysis]) -> dict:
     probs = [f.xgboost_probability for f in frame_analyses]
-    print(f"Minimum Score:              {min(probs):.4f}")
-    print(f"Maximum Score:              {max(probs):.4f}")
-    print(f"Mean Score:                 {np.mean(probs):.4f}")
-    print(f"Median Score:               {np.median(probs):.4f}")
-    print(f"Std Dev:                    {np.std(probs):.4f}")
-    
-    # Score histogram
-    print(f"\nScore Distribution:")
-    ranges = [(0, 0.2), (0.2, 0.4), (0.4, 0.6), (0.6, 0.8), (0.8, 1.0)]
-    for low, high in ranges:
-        count = sum(1 for p in probs if low <= p < high)
-        pct = count / len(probs) * 100
-        bar = "█" * int(pct / 2)
-        print(f"  {low:.1f}-{high:.1f}: {bar} {count:4d} ({pct:5.1f}%)")
-
-def visualize_peak_frame(report: ExamReport):
-    """Display the peak suspicious frame with annotations."""
-    
-    frame = report.peak_frame_image.copy()
-    
-    # Add text annotations
-    cv2.putText(
-        frame,
-        f"Suspicious Score: {report.peak_score:.4f}",
-        (50, 50),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.2,
-        (0, 0, 255),  # Red
-        2
-    )
-    
-    cv2.putText(
-        frame,
-        f"Risk Level: {report.risk_level.value}",
-        (50, 100),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.2,
-        (0, 0, 255),
-        2
-    )
-    
-    cv2.putText(
-        frame,
-        f"Time: {report.peak_frame_timestamp}s",
-        (50, 150),
-        cv2.FONT_HERSHEY_SIMPLEX,
-        1.2,
-        (0, 165, 255),  # Orange
-        2
-    )
-    
-    # Add border based on risk level
-    color_map = {
-        RiskLevel.MINIMAL: (0, 255, 0),    # Green
-        RiskLevel.LOW: (0, 255, 255),      # Yellow
-        RiskLevel.MODERATE: (0, 165, 255), # Orange
-        RiskLevel.HIGH: (0, 127, 255),     # Red-Orange
-        RiskLevel.CRITICAL: (0, 0, 255)    # Red
+    stats = {
+        "min": float(min(probs)) if probs else 0.0,
+        "max": float(max(probs)) if probs else 0.0,
+        "mean": float(np.mean(probs)) if probs else 0.0,
+        "median": float(np.median(probs)) if probs else 0.0,
+        "std": float(np.std(probs)) if probs else 0.0,
     }
+    return {
+        "exam_id": report.exam_id,
+        "peak_score": report.peak_score,
+        "risk_level": report.risk_level.value,
+        "peak_frame_id": report.peak_frame_id,
+        "peak_frame_timestamp": report.peak_frame_timestamp,
+        "total_frames": report.total_frames,
+        "recommendation": report.recommendation,
+        "score_stats": stats,
+    }
+
+
+def _encode_image_b64(image: np.ndarray) -> str:
+    ok, buffer = cv2.imencode(".jpg", image)
+    if not ok:
+        return ""
+    return base64.b64encode(buffer).decode("utf-8")
+
+
+# ============================================================================
+# 3. FLASK APP
+# ============================================================================
+
+
+app = Flask(__name__)
+CORS(app)
+
+app.config["MAX_CONTENT_LENGTH"] = 200 * 1024 * 1024
+app.config["UPLOAD_FOLDER"] = "uploads"
+app.config["ALLOWED_EXTENSIONS"] = {"mp4", "avi", "mov", "mkv"}
+
+os.makedirs(app.config["UPLOAD_FOLDER"], exist_ok=True)
+
+processor: Optional[VideoProcessor] = None
+
+
+def allowed_file(filename: str) -> bool:
+    return "." in filename and filename.rsplit(".", 1)[1].lower() in app.config[
+        "ALLOWED_EXTENSIONS"
+    ]
+
+
+def init_processor() -> bool:
+    global processor
+    try:
+        processor = VideoProcessor()
+        return True
+    except Exception as exc:
+        print(f"Error initializing processor: {exc}")
+        processor = None
+        return False
+
+
+init_processor()
+
+
+@app.route("/")
+def index():
     
-    border_color = color_map[report.risk_level]
-    border_thickness = 5
-    cv2.rectangle(
-        frame,
-        (0, 0),
-        (frame.shape[1] - 1, frame.shape[0] - 1),
-        border_color,
-        border_thickness
+    return render_template_string(
+        """
+        <!doctype html>
+        <html lang="en">
+        <head>
+          <meta charset="UTF-8">
+          <meta name="viewport" content="width=device-width, initial-scale=1.0">
+          <title>Fraud Detection Video Processing</title>
+          <style>
+            * { margin: 0; padding: 0; box-sizing: border-box; }
+            body {
+              font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+              background: linear-gradient(135deg, #0f2027 0%, #203a43 45%, #2c5364 100%);
+              min-height: 100vh;
+              padding: 24px;
+              color: #1f2937;
+            }
+            .container {
+              max-width: 1100px;
+              margin: 0 auto;
+              background: #ffffff;
+              border-radius: 18px;
+              box-shadow: 0 24px 60px rgba(0, 0, 0, 0.25);
+              padding: 36px;
+            }
+            h1 {
+              text-align: center;
+              font-size: 2.2rem;
+              margin-bottom: 8px;
+              color: #0f172a;
+            }
+            .subtitle {
+              text-align: center;
+              color: #64748b;
+              margin-bottom: 32px;
+              font-size: 1.05rem;
+            }
+            .upload-section {
+              border: 2px dashed #2c5364;
+              border-radius: 14px;
+              padding: 32px;
+              text-align: center;
+              background: #f8fafc;
+              transition: all 0.25s ease;
+            }
+            .upload-section:hover { background: #f1f5f9; }
+            .upload-section.dragover {
+              border-color: #0f172a;
+              background: #e2e8f0;
+            }
+            input[type="file"] { display: none; }
+            .upload-label {
+              display: inline-block;
+              padding: 12px 24px;
+              background: #0f172a;
+              color: #ffffff;
+              border-radius: 10px;
+              cursor: pointer;
+              font-weight: 600;
+              transition: transform 0.2s ease;
+            }
+            .upload-label:hover { transform: scale(1.03); }
+            .grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+              gap: 12px;
+              margin-top: 20px;
+            }
+            .field label {
+              display: block;
+              font-size: 0.9rem;
+              color: #475569;
+              margin-bottom: 6px;
+            }
+            .field input {
+              width: 100%;
+              padding: 10px 12px;
+              border: 1px solid #cbd5f5;
+              border-radius: 8px;
+              font-size: 0.95rem;
+            }
+            .btn {
+              margin-top: 16px;
+              background: #2c5364;
+              color: #ffffff;
+              padding: 12px 22px;
+              border: none;
+              border-radius: 8px;
+              font-size: 1rem;
+              cursor: pointer;
+              transition: background 0.2s ease;
+            }
+            .btn:hover { background: #1f3b47; }
+            .loading, .error, .result { margin-top: 24px; }
+            .loading { display: none; text-align: center; color: #334155; }
+            .loading.active { display: block; }
+            .spinner {
+              border: 4px solid #e2e8f0;
+              border-top: 4px solid #0f172a;
+              border-radius: 50%;
+              width: 46px;
+              height: 46px;
+              animation: spin 1s linear infinite;
+              margin: 0 auto 14px;
+            }
+            @keyframes spin {
+              0% { transform: rotate(0deg); }
+              100% { transform: rotate(360deg); }
+            }
+            .error {
+              display: none;
+              background: #fee2e2;
+              color: #991b1b;
+              padding: 14px;
+              border-radius: 8px;
+            }
+            .error.active { display: block; }
+            .result {
+              display: none;
+              background: #f8fafc;
+              border-radius: 12px;
+              padding: 20px;
+            }
+            .result.active { display: block; }
+            .report-grid {
+              display: grid;
+              grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+              gap: 12px;
+              margin-top: 12px;
+            }
+            .card {
+              background: #ffffff;
+              border: 1px solid #e2e8f0;
+              border-radius: 10px;
+              padding: 12px;
+              font-size: 0.95rem;
+            }
+            .card strong { color: #0f172a; }
+            .peak-frame {
+              margin-top: 16px;
+              text-align: center;
+            }
+            .peak-frame img {
+              max-width: 100%;
+              border-radius: 10px;
+              box-shadow: 0 8px 24px rgba(0, 0, 0, 0.2);
+            }
+          </style>
+        </head>
+        <body>
+          <div class="container">
+            <h1>AI-BASED FRAUD DETECTION SYSTEM FOR PROCTORING ONLINE EXAMS</h1>
+            <p class="subtitle">Upload a proctored exam video and receive a session-level suspiciousness report.</p>
+
+            <div class="upload-section" id="uploadSection">
+              <h2>Upload Exam Video</h2>
+              <p style="margin: 12px 0; color: #64748b;">Drop a video or use the button below</p>
+              <label for="videoInput" class="upload-label">Choose Video</label>
+              <input type="file" id="videoInput" accept="video/*">
+
+              <div class="grid">
+                <div class="field">
+                  <label for="examId">Exam ID</label>
+                  <input type="text" id="examId" placeholder="exam_001" value="exam_001">
+                </div>
+                <div class="field">
+                  <label for="fpsSample">FPS Sample</label>
+                  <input type="number" id="fpsSample" value="1" min="1">
+                </div>
+                <div class="field">
+                  <label for="maxFrames">Max Frames (optional)</label>
+                  <input type="number" id="maxFrames" placeholder="e.g., 300">
+                </div>
+                <div class="field">
+                  <label for="includePeak">Include Peak Frame</label>
+                  <input type="checkbox" id="includePeak" checked>
+                </div>
+              </div>
+
+              <button class="btn" id="uploadBtn">Analyze Video</button>
+              <p style="margin-top: 10px; color: #94a3b8; font-size: 0.9rem;">
+                Supported: MP4, AVI, MOV, MKV
+              </p>
+            </div>
+
+            <div class="loading" id="loading">
+              <div class="spinner"></div>
+              <p>Processing video and generating report...</p>
+            </div>
+
+            <div class="error" id="error"></div>
+
+            <div class="result" id="result">
+              <h3>Suspiciousness Report</h3>
+              <div class="report-grid" id="reportGrid"></div>
+              <div class="peak-frame" id="peakFrame"></div>
+            </div>
+          </div>
+
+          <script>
+            const videoInput = document.getElementById("videoInput");
+            const uploadSection = document.getElementById("uploadSection");
+            const uploadBtn = document.getElementById("uploadBtn");
+            const loading = document.getElementById("loading");
+            const error = document.getElementById("error");
+            const result = document.getElementById("result");
+            const reportGrid = document.getElementById("reportGrid");
+            const peakFrame = document.getElementById("peakFrame");
+
+            uploadSection.addEventListener("dragover", (e) => {
+              e.preventDefault();
+              uploadSection.classList.add("dragover");
+            });
+
+            uploadSection.addEventListener("dragleave", () => {
+              uploadSection.classList.remove("dragover");
+            });
+
+            uploadSection.addEventListener("drop", (e) => {
+              e.preventDefault();
+              uploadSection.classList.remove("dragover");
+              const files = e.dataTransfer.files;
+              if (files.length > 0) {
+                videoInput.files = files;
+              }
+            });
+
+            uploadBtn.addEventListener("click", () => {
+              const file = videoInput.files[0];
+              if (!file) {
+                showError("Please select a video file.");
+                return;
+              }
+
+              const formData = new FormData();
+              formData.append("video", file);
+              formData.append("exam_id", document.getElementById("examId").value || "exam_001");
+              formData.append("fps_sample", document.getElementById("fpsSample").value || "1");
+              formData.append("max_frames", document.getElementById("maxFrames").value || "");
+              formData.append("include_peak_frame", document.getElementById("includePeak").checked ? "1" : "0");
+
+              loading.classList.add("active");
+              result.classList.remove("active");
+              error.classList.remove("active");
+
+              fetch("/predict/video", { method: "POST", body: formData })
+                .then((response) => response.json())
+                .then((data) => {
+                  loading.classList.remove("active");
+                  if (data.error) {
+                    showError(data.error);
+                    return;
+                  }
+                  renderReport(data.report);
+                  result.classList.add("active");
+                })
+                .catch((err) => {
+                  loading.classList.remove("active");
+                  showError("Error processing video: " + err.message);
+                });
+            });
+
+            function showError(message) {
+              error.textContent = message;
+              error.classList.add("active");
+            }
+
+            function renderReport(report) {
+              reportGrid.innerHTML = "";
+              peakFrame.innerHTML = "";
+
+              const items = [
+                ["Exam ID", report.exam_id],
+                ["Risk Level", report.risk_level],
+                ["Peak Score", report.peak_score],
+                ["Peak Frame", report.peak_frame_id],
+                ["Peak Timestamp (s)", report.peak_frame_timestamp],
+                ["Total Frames", report.total_frames],
+                ["Recommendation", report.recommendation],
+                ["Score Min", report.score_stats.min],
+                ["Score Max", report.score_stats.max],
+                ["Score Mean", report.score_stats.mean],
+                ["Score Median", report.score_stats.median],
+                ["Score Std", report.score_stats.std]
+              ];
+
+              items.forEach(([label, value]) => {
+                const card = document.createElement("div");
+                card.className = "card";
+                card.innerHTML = `<strong>${label}:</strong> ${value}`;
+                reportGrid.appendChild(card);
+              });
+
+              if (report.peak_frame_image) {
+                peakFrame.innerHTML = `
+                  <h4>Peak Suspicious Frame</h4>
+                  <img src="data:image/jpeg;base64,${report.peak_frame_image}" alt="Peak Frame">
+                `;
+              }
+            }
+          </script>
+        </body>
+        </html>
+        """
     )
-    
-    # Display using matplotlib
-    plt.figure(figsize=(14, 8))
-    plt.imshow(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
-    plt.title(
-        f"Most Suspicious Frame - Exam {report.exam_id}\n"
-        f"Score: {report.peak_score:.4f} | Risk: {report.risk_level.value}",
-        fontsize=14,
-        fontweight='bold'
+
+
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify(
+        {
+            "status": "healthy" if processor is not None else "processor_not_loaded",
+            "processor_loaded": processor is not None,
+            "endpoints": {"web_interface": "/", "video_prediction": "/predict/video"},
+        }
     )
-    plt.axis('off')
-    plt.tight_layout()
-    plt.show()
 
-def plot_fraud_scores(frame_analyses: List[FrameAnalysis]):
-    """Plot fraud scores over time."""
 
-    timestamps = [f.timestamp for f in frame_analyses]
-    probabilities = [f.xgboost_probability for f in frame_analyses]
+@app.route("/predict/video", methods=["POST"])
+def predict_video():
+    if processor is None:
+        return jsonify({"error": "Processor not loaded. Check model files."}), 503
     
-    plt.figure(figsize=(14, 6))
-    plt.plot(timestamps, probabilities, linewidth=1.5, color='darkred')
-    plt.fill_between(timestamps, probabilities, alpha=0.3, color='red')
-    
-    # Add threshold lines
-    plt.axhline(y=0.5, color='orange', linestyle='--', label='Moderate Threshold (0.5)')
-    plt.axhline(y=0.75, color='red', linestyle='--', label='High Threshold (0.75)')
-    plt.axhline(y=0.90, color='darkred', linestyle='--', label='Critical Threshold (0.90)')
-    plt.xlabel('Time (seconds)', fontsize=12)
-    plt.ylabel('Suspicious Probability Score', fontsize=12)
-    plt.title('Fraud Detection Score Timeline', fontsize=14, fontweight='bold')
-    plt.legend(loc='upper right')
-    plt.grid(True, alpha=0.3)
-    plt.ylim(0, 1.0)
-    plt.tight_layout()
-    plt.show()
+    if "video" not in request.files:
+        return jsonify({"error": "No video file provided"}), 400
 
-# ============================================================================
-# 5. MAIN EXECUTION
-# ============================================================================
+    file = request.files["video"]
+    if file.filename == "":
+        return jsonify({"error": "No file selected"}), 400
 
-def main(video_path: str, xgb_model_path: str, exam_id: str = "exam_001"):
-    """
-    End-to-end fraud detection pipeline.
-    
-    Args:
-        video_path: Path to exam video
-        xgb_model_path: Path to trained XGBoost model
-        exam_id: Exam identifier
-    """
-    
-    # Initialize processor
-    processor = VideoProcessor(xgb_model_path)
-    
-    # Process video
-    frame_analyses, report = processor.process_video(
-        video_path=video_path,
-        exam_id=exam_id,
-        fps_sample=1,  # Process every frame (adjust for speed)
-        max_frames=None  # Process all frames (set to 300 for testing)
-    )
-    
-    # Display report
-    display_report(report, frame_analyses)
+    if not allowed_file(file.filename):
+        return jsonify({"error": "Invalid file type. Allowed: MP4, AVI, MOV, MKV"}), 400
 
-    # Visualize peak frame
-    print(f"\nDisplaying peak suspicious frame...")
-    visualize_peak_frame(report)
-    
-    # Plot timeline
-    print(f"Plotting fraud score timeline...")
-    plot_fraud_scores(frame_analyses)
-    return report, frame_analyses
+    exam_id = request.form.get("exam_id", "exam_001")
+    fps_sample = int(request.form.get("fps_sample", 1))
+    max_frames_raw = request.form.get("max_frames", "").strip()
+    max_frames = int(max_frames_raw) if max_frames_raw else None
+    include_peak_frame = request.form.get("include_peak_frame", "0") == "1"
 
-# ============================================================================
-# 6. USAGE EXAMPLE
-# ============================================================================
+    filename = secure_filename(file.filename)
+    save_path = os.path.join(app.config["UPLOAD_FOLDER"], filename)
+    file.save(save_path)
+
+    try:
+        frame_analyses, report = processor.process_video(
+            video_path=save_path,
+            exam_id=exam_id,
+            fps_sample=fps_sample,
+            max_frames=max_frames,
+        )
+        payload = _build_report_payload(report, frame_analyses)
+        if include_peak_frame and report.peak_frame_image is not None:
+            payload["peak_frame_image"] = _encode_image_b64(report.peak_frame_image)
+        return jsonify({"success": True, "report": payload})
+    except Exception as exc:
+        return jsonify({"error": f"Video processing error: {exc}"}), 500
 
 if __name__ == "__main__":
-    
-    report, frame_analyses = main(
-        video_path=r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\Example Images\input.mp4",  
-        xgb_model_path = r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\models\xgboost_fraud_detection_model.pkl",
-        exam_id="exam_001"
-    )
-    print(f"\n✓ Fraud detection complete!")
-    print(f"Peak Score: {report.peak_score:.4f}")
-    print(f"Risk Level: {report.risk_level.value}")
+    print("=" * 60)
+    print("Fraud Detection Video API")
+    print("=" * 60)
+    print("Access the web interface at: http://localhost:5000")
+    print("Health check: http://localhost:5000/health")
+    print("=" * 60)
+    app.run(debug=True, host="0.0.0.0", port=5000)

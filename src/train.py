@@ -20,11 +20,11 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import (
     DATASET_PATH, MODEL_PATH, PREPROCESSOR_PATH, MODEL_DIR,
-    TEST_SIZE, RANDOM_STATE, XGBOOST_PARAMS, TARGET_COLUMN
+    TEST_SIZE, RANDOM_STATE, XGBOOST_PARAMS, TARGET_COLUMN,
+    CATEGORICAL_COLUMNS, AUTO_DETECT_CATEGORICALS
 )
+
 from src.data_preprocessing import load_and_preprocess_data, DataPreprocessor
-
-
 def train_model():
     """Train XGBoost model for fraud detection"""
 
@@ -32,31 +32,40 @@ def train_model():
     print("Fraud Detection System - Model Training")
     print("=" * 60)
 
-    # Load and preprocess data
-    print("\n[1/5] Loading and preprocessing data...")
-    X, y, preprocessor = load_and_preprocess_data(
-        DATASET_PATH,
-        target_column=TARGET_COLUMN,
-        fit_preprocessor=True
+    # Load raw data first to avoid leakage during preprocessing
+    print("\n[1/5] Loading data...")
+    df = pd.read_csv(DATASET_PATH)
+
+    print(f"   Dataset shape: {df.shape}")
+    print(f"   Features: {df.shape[1] - 1}")
+    print(f"   Samples: {df.shape[0]}")
+    print(f"   Class distribution:\n{df[TARGET_COLUMN].value_counts().to_dict()}")
+
+    # Split raw data before preprocessing
+    print("\n[2/5] Splitting data into train/valid/test sets...")
+    train_df, temp_df = train_test_split(
+        df, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=df[TARGET_COLUMN]
     )
-    
-    print(f"   Dataset shape: {X.shape}")
-    print(f"   Features: {X.shape[1]}")
-    print(f"   Samples: {X.shape[0]}")
-    print(f"   Class distribution:\n{y.value_counts().to_dict()}")
-    
-    # Split data
-    print("\n[2/5] Splitting data into train/test sets...")
-    X_train, X_t, y_train, y_t = train_test_split(
-        X, y, test_size=TEST_SIZE, random_state=RANDOM_STATE, stratify=y
+    test_df, valid_df = train_test_split(
+        temp_df, test_size=0.5, random_state=RANDOM_STATE, stratify=temp_df[TARGET_COLUMN]
     )
-    X_test,X_valid, y_test, y_valid = train_test_split(
-        X_t, y_t, test_size=0.5, random_state=RANDOM_STATE, stratify=y_t
+
+    # Preprocess data (fit on train only)
+    preprocessor = DataPreprocessor(
+        categorical_columns=CATEGORICAL_COLUMNS,
+        auto_detect_categoricals=AUTO_DETECT_CATEGORICALS
     )
+    X_train, y_train = preprocessor.fit_transform(train_df, target_column=TARGET_COLUMN)
+    X_test, y_test = preprocessor.transform(test_df, target_column=TARGET_COLUMN)
+    X_valid, y_valid = preprocessor.transform(valid_df, target_column=TARGET_COLUMN)
     
+        # Shuffle labels test
+    
+    y_train = np.random.permutation(y_train)
+
     print(f"   Training set: {X_train.shape[0]} samples")
     print(f"   Test set: {X_test.shape[0]} samples")
-    
+
     # Train XGBoost model
     print("\n[3/5] Training XGBoost model...")
     print(f"   Parameters: {XGBOOST_PARAMS}")
@@ -67,7 +76,7 @@ def train_model():
         eval_set=[(X_train, y_train), (X_test, y_test)],
         verbose=False
     )
-    
+
     # Make predictions
     print("\n[4/5] Evaluating model...")
     y_train_pred = model.predict(X_train)

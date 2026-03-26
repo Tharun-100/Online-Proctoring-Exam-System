@@ -18,7 +18,7 @@ class FeatureExtractor:
         """
         Initialize MediaPipe Tasks for feature extraction
         (Face detection, face mesh, hands, pose)
-
+        
         model_dir:
             Directory containing .task models
         """
@@ -370,7 +370,7 @@ class FeatureExtractor:
         features["head_roll"]  = np.radians(roll)
 
         # Head pose label
-        print("Head Pose Radians - Pitch:", pitch, "Yaw:", yaw, "Roll:", roll)
+        print("Head Pose - Pitch:", pitch, "Yaw:", yaw, "Roll:", roll)
 
         # print(features["head_pitch"])
         
@@ -381,15 +381,15 @@ class FeatureExtractor:
     # -----------------------------In General pitch has more dominance over pitch:--------------------
 
         if abs(yaw) <= 20 and abs(pitch) <= 15:
-            features["head_pose"] = "Forward"
+            features["head_pose"] = "forward"
         # elif pitch < -15:
         #     features["head_pose"] = "Up" # This is a bit tricky because if the person is looking up, the pitch will be negative, but we can set a threshold to avoid misclassification due to slight head movements. We can say that if the pitch is less than -15 degrees, we consider it as looking up.
         elif pitch > 15:
-            features["head_pose"] = "Down"
+            features["head_pose"] = "down"
         elif yaw < -15:
-            features["head_pose"] = "Left"
+            features["head_pose"] = "left"
         elif yaw > 20:
-            features["head_pose"] = "Right"
+            features["head_pose"] = "right"
 
         # features["nose_2d"] = (int(landmarks[1].x * width),int(landmarks[1].y * height))
         # features["nose_3d"]=(int(landmarks[1].x * width), int(landmarks[1].y * height),int( landmarks[1].z * 3000))

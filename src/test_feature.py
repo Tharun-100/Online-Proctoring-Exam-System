@@ -1,15 +1,20 @@
-import cv2
+__test__ = False
+
 import pprint
-from feature_extraction import FeatureExtractor  
+from pathlib import Path
 print("TEST SCRIPT STARTED")
 
 def main():
+    import cv2
+    from feature_extraction import FeatureExtractor
+
     # ---------- CHANGE THIS ----------
     print("I am inside main now")
-    image_path = r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\Example Images\Test Images.jpg"   # put any face image here
+    repo_root = Path(__file__).resolve().parents[1]
+    image_path = repo_root / "Example Images" / "Test Images.jpg"   # put any face image here
     # ---------------------------------
 
-    image = cv2.imread(image_path)
+    image = cv2.imread(str(image_path))
     print("Image shape:", None if image is None else image.shape)
 
 

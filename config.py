@@ -32,6 +32,10 @@ XGBOOST_PARAMS = {
 # Feature columns (all except label)
 FEATURE_COLUMNS = None  # Will be set dynamically
 
+# Categorical feature handling
+CATEGORICAL_COLUMNS = ['head_pose', 'gaze_direction']
+AUTO_DETECT_CATEGORICALS = True
+
 # Target column
 TARGET_COLUMN = "label"
 

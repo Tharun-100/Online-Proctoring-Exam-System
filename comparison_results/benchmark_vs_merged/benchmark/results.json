@@ -1,0 +1,101 @@
+{
+  "dataset": "benchmark",
+  "path": "Dataset\\Students suspicious behaviors detection dataset_V1.csv",
+  "rows_in_file": 5500,
+  "exact_duplicates_removed": 76,
+  "rows_used": 5424,
+  "missing_values": 1620,
+  "class_distribution_used": {
+    "0": 2881,
+    "1": 2543
+  },
+  "split_counts": {
+    "train": 3036,
+    "validation": 760,
+    "test": 1628
+  },
+  "processed_feature_count": 46,
+  "model_parameters": {
+    "objective": "binary:logistic",
+    "eval_metric": [
+      "logloss",
+      "auc",
+      "error",
+      "aucpr"
+    ],
+    "n_estimators": 100,
+    "learning_rate": 0.1,
+    "max_depth": 6,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "decision_threshold": 0.5,
+  "metrics": {
+    "train": {
+      "accuracy": 0.9996706192358367,
+      "balanced_accuracy": 0.9996488764044944,
+      "precision": 1.0,
+      "recall": 0.9992977528089888,
+      "specificity": 1.0,
+      "f1": 0.9996487530734106,
+      "roc_auc": 0.9999991287255695,
+      "pr_auc": 0.9999990150810785,
+      "mcc": 0.9993388941564786,
+      "confusion_matrix": [
+        [
+          1612,
+          0
+        ],
+        [
+          1,
+          1423
+        ]
+      ]
+    },
+    "validation": {
+      "accuracy": 0.993421052631579,
+      "balanced_accuracy": 0.9931443987095339,
+      "precision": 0.9971671388101983,
+      "recall": 0.9887640449438202,
+      "specificity": 0.9975247524752475,
+      "f1": 0.9929478138222849,
+      "roc_auc": 0.9989640115696963,
+      "pr_auc": 0.9990339156536362,
+      "mcc": 0.9868138234584234,
+      "confusion_matrix": [
+        [
+          403,
+          1
+        ],
+        [
+          4,
+          352
+        ]
+      ]
+    },
+    "test": {
+      "accuracy": 0.9944717444717445,
+      "balanced_accuracy": 0.9941795013598588,
+      "precision": 0.9986772486772487,
+      "recall": 0.9895150720838795,
+      "specificity": 0.9988439306358381,
+      "f1": 0.9940750493745886,
+      "roc_auc": 0.9994863597451497,
+      "pr_auc": 0.9994755207696605,
+      "mcc": 0.9889308043311712,
+      "confusion_matrix": [
+        [
+          864,
+          1
+        ],
+        [
+          8,
+          755
+        ]
+      ]
+    }
+  }
+}

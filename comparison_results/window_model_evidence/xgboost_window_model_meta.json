@@ -1,0 +1,110 @@
+{
+  "model_path": "comparison_results\\window_model_evidence\\xgboost_window_model.json",
+  "meta_path": "comparison_results\\window_model_evidence\\xgboost_window_model_meta.json",
+  "feature_columns": [
+    "phone_present_ratio",
+    "max_phone_conf",
+    "avg_num_faces",
+    "no_face_ratio",
+    "multiple_faces_ratio",
+    "head_pose_away_ratio",
+    "avg_head_pitch",
+    "avg_head_yaw",
+    "avg_head_roll"
+  ],
+  "drop_columns": [
+    "video_id",
+    "window_start_sec",
+    "window_end_sec",
+    "source_folder"
+  ],
+  "label_column": "label",
+  "group_column": "video_id",
+  "decision_threshold": 0.5,
+  "split_percentages": {
+    "train": 48.01,
+    "validation": 11.35,
+    "test": 40.65
+  },
+  "split_counts": {
+    "train": 1324,
+    "validation": 313,
+    "test": 1121
+  },
+  "label_distribution": {
+    "overall": {
+      "0": 1704,
+      "1": 1054
+    },
+    "train": {
+      "0": 928,
+      "1": 396
+    },
+    "validation": {
+      "0": 206,
+      "1": 107
+    },
+    "test": {
+      "0": 570,
+      "1": 551
+    }
+  },
+  "xgboost_params": {
+    "objective": "binary:logistic",
+    "eval_metric": [
+      "logloss",
+      "auc",
+      "error",
+      "aucpr"
+    ],
+    "n_estimators": 1000,
+    "learning_rate": 0.03,
+    "max_depth": 4,
+    "min_child_weight": 1,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "reg_lambda": 2.0,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist",
+    "scale_pos_weight": 2.3434343434343434,
+    "early_stopping_rounds": 50
+  },
+  "best_iteration": 6,
+  "best_score": 0.9955653541831128,
+  "metrics": {
+    "train": {
+      "accuracy": 1.0,
+      "balanced_accuracy": 1.0,
+      "precision": 1.0,
+      "recall": 1.0,
+      "specificity": 1.0,
+      "f1": 1.0,
+      "roc_auc": 1.0,
+      "pr_auc": 1.0,
+      "mcc": 1.0
+    },
+    "validation": {
+      "accuracy": 0.9936102236421726,
+      "balanced_accuracy": 0.9906542056074766,
+      "precision": 1.0,
+      "recall": 0.9813084112149533,
+      "specificity": 1.0,
+      "f1": 0.9905660377358491,
+      "roc_auc": 0.9970057163596769,
+      "pr_auc": 0.9954267662047048,
+      "mcc": 0.985836068225752
+    },
+    "test": {
+      "accuracy": 0.9776984834968778,
+      "balanced_accuracy": 0.9774047186932849,
+      "precision": 0.9943609022556391,
+      "recall": 0.9600725952813067,
+      "specificity": 0.9947368421052631,
+      "f1": 0.976915974145891,
+      "roc_auc": 0.9884388830515489,
+      "pr_auc": 0.9907672864238329,
+      "mcc": 0.9559088153412773
+    }
+  }
+}

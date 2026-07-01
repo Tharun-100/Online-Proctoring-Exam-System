@@ -1,0 +1,101 @@
+{
+  "dataset": "merged",
+  "path": "merged_features.csv",
+  "rows_in_file": 6964,
+  "exact_duplicates_removed": 77,
+  "rows_used": 6887,
+  "missing_values": 1945,
+  "class_distribution_used": {
+    "0": 3576,
+    "1": 3311
+  },
+  "split_counts": {
+    "train": 3856,
+    "validation": 964,
+    "test": 2067
+  },
+  "processed_feature_count": 46,
+  "model_parameters": {
+    "objective": "binary:logistic",
+    "eval_metric": [
+      "logloss",
+      "auc",
+      "error",
+      "aucpr"
+    ],
+    "n_estimators": 100,
+    "learning_rate": 0.1,
+    "max_depth": 6,
+    "subsample": 0.8,
+    "colsample_bytree": 0.8,
+    "random_state": 42,
+    "n_jobs": -1,
+    "tree_method": "hist"
+  },
+  "decision_threshold": 0.5,
+  "metrics": {
+    "train": {
+      "accuracy": 0.9997406639004149,
+      "balanced_accuracy": 0.9997303128371089,
+      "precision": 1.0,
+      "recall": 0.9994606256742179,
+      "specificity": 1.0,
+      "f1": 0.9997302400863232,
+      "roc_auc": 0.9999752135674467,
+      "pr_auc": 0.999974500288812,
+      "mcc": 0.999480687074113,
+      "confusion_matrix": [
+        [
+          2002,
+          0
+        ],
+        [
+          1,
+          1853
+        ]
+      ]
+    },
+    "validation": {
+      "accuracy": 0.9906639004149378,
+      "balanced_accuracy": 0.9907722352271698,
+      "precision": 0.9871244635193133,
+      "recall": 0.9935205183585313,
+      "specificity": 0.9880239520958084,
+      "f1": 0.9903121636167922,
+      "roc_auc": 0.9980686575014118,
+      "pr_auc": 0.9978002246296176,
+      "mcc": 0.9813223936713539,
+      "confusion_matrix": [
+        [
+          495,
+          6
+        ],
+        [
+          3,
+          460
+        ]
+      ]
+    },
+    "test": {
+      "accuracy": 0.9937106918238994,
+      "balanced_accuracy": 0.9936459390077651,
+      "precision": 0.9949545913218971,
+      "recall": 0.9919517102615694,
+      "specificity": 0.9953401677539608,
+      "f1": 0.9934508816120907,
+      "roc_auc": 0.999638089487531,
+      "pr_auc": 0.9996484487792155,
+      "mcc": 0.9874057559821977,
+      "confusion_matrix": [
+        [
+          1068,
+          5
+        ],
+        [
+          8,
+          986
+        ]
+      ]
+    }
+  }
+}

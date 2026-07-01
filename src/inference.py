@@ -18,6 +18,7 @@ class FraudDetectionInference:
     """Class for making fraud detection predictions"""
     
     def __init__(self, model_path=None, preprocessor_path=None):
+        
         """
         Initialize inference pipeline
         

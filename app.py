@@ -1,9 +1,9 @@
 import base64
 import os
 import pickle
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
-from typing import List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -33,6 +33,8 @@ class FrameAnalysis:
     exam_id: str
     xgboost_probability: float
     frame_image: np.ndarray = None
+    suspicious_events: List[str] = field(default_factory=list)
+    suspicious_meta: Dict = field(default_factory=dict)
 
 @dataclass
 class ExamReport:
@@ -42,12 +44,125 @@ class ExamReport:
     peak_frame_id: int
     peak_frame_timestamp: float
     peak_frame_image: np.ndarray
+    peak_frame_events: List[str]
     total_frames: int
     recommendation: str
-
+    
 # ============================================================================
 # 2. VIDEO PROCESSING PIPELINE
 # ============================================================================
+
+def _collect_suspicious_events(
+    features: Dict, *, phone_bbox: Optional[Tuple[int, int, int, int]] = None
+) -> Tuple[List[str], Dict]:
+    events: List[str] = []
+    meta: Dict = {}
+
+    if int(features.get("phone_present", 0) or 0) == 1:
+        events.append("Mobile phone detected")
+        if phone_bbox is not None:
+            meta["phone_bbox"] = phone_bbox
+
+    if int(features.get("hand_obj_interaction", 0) or 0) == 1:
+        events.append("Hand-object interaction")
+
+    face_present = int(features.get("face_present", 0) or 0)
+    if face_present == 0:
+        events.append("Face not visible")
+
+    try:
+        if float(features.get("no_of_face", 0) or 0) > 1:
+            events.append("Multiple faces detected")
+    except Exception:
+        pass
+
+    head_pose = (features.get("head_pose") or "None").lower()
+    if head_pose in {"left", "right"}:
+        events.append(f"Looking {head_pose}")
+    elif head_pose == "down":
+        events.append("Looking down")
+
+    gaze_direction = (features.get("gaze_direction") or "None").lower()
+    if gaze_direction.endswith("left"):
+        events.append("Gaze left")
+    elif gaze_direction.endswith("right"):
+        events.append("Gaze right")
+
+    # De-duplicate while preserving order
+    seen = set()
+    deduped = []
+    for e in events:
+        if e not in seen:
+            deduped.append(e)
+            seen.add(e)
+
+    return deduped, meta
+
+
+def _annotate_peak_frame(
+    frame: np.ndarray, suspicious_events: List[str], suspicious_meta: Dict
+) -> np.ndarray:
+    if frame is None:
+        return frame
+    if not suspicious_events and not suspicious_meta:
+        return frame
+
+    annotated = frame.copy()
+    height, width = annotated.shape[:2]
+
+    phone_bbox = suspicious_meta.get("phone_bbox")
+    if phone_bbox and len(phone_bbox) == 4:
+        x1, y1, x2, y2 = [int(v) for v in phone_bbox]
+        x1 = max(0, min(width - 1, x1))
+        y1 = max(0, min(height - 1, y1))
+        x2 = max(0, min(width - 1, x2))
+        y2 = max(0, min(height - 1, y2))
+        if x2 > x1 and y2 > y1:
+            cv2.rectangle(annotated, (x1, y1), (x2, y2), (0, 0, 255), 3)
+            cv2.putText(
+                annotated,
+                "MOBILE",
+                (x1, max(20, y1 - 10)),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.8,
+                (0, 0, 255),
+                2,
+            )
+
+    # Draw a readable top-left panel with the detected suspicious events.
+    panel_lines = ["Peak Frame - Detected:"] + [f"- {e}" for e in suspicious_events]
+    if len(panel_lines) == 1:
+        return annotated
+
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.6
+    thickness = 2
+    line_height = 22
+    padding = 10
+
+    max_line_w = 0
+    for line in panel_lines:
+        (tw, _), _ = cv2.getTextSize(line, font, font_scale, thickness)
+        max_line_w = max(max_line_w, tw)
+
+    panel_w = min(width - 20, max_line_w + padding * 2)
+    panel_h = min(height - 20, padding * 2 + line_height * len(panel_lines))
+    x0, y0 = 10, 10
+    x1, y1 = x0 + panel_w, y0 + panel_h
+
+    overlay = annotated.copy()
+    cv2.rectangle(overlay, (x0, y0), (x1, y1), (20, 20, 20), -1)
+    annotated = cv2.addWeighted(overlay, 0.55, annotated, 0.45, 0)
+    cv2.rectangle(annotated, (x0, y0), (x1, y1), (0, 0, 255), 2)
+
+    y = y0 + padding + 16
+    for idx, line in enumerate(panel_lines):
+        color = (255, 255, 255) if idx == 0 else (0, 200, 255)
+        cv2.putText(annotated, line, (x0 + padding, y), font, font_scale, color, thickness)
+        y += line_height
+
+    return annotated
+
 
 class VideoProcessor:
     """Process video file: extract frames, features, and fraud predictions."""
@@ -68,7 +183,7 @@ class VideoProcessor:
         self,
         video_path: str,
         exam_id: str = "exam_001",
-        fps_sample: int = 1,
+        fps_sample: float = 20.0,
         max_frames: Optional[int] = None,
     ) -> Tuple[List[FrameAnalysis], ExamReport]:
         """Process a video and generate a fraud detection report."""
@@ -82,22 +197,43 @@ class VideoProcessor:
         processed_count = 0
         inference = FraudDetectionInference()
 
+        # `fps_sample` is treated as the target sampling rate (frames per second).
+        target_fps = float(fps_sample) if fps_sample else 20.0
+        if target_fps <= 0:
+            target_fps = 20.0
+        sample_period_s = 1.0 / target_fps
+        next_sample_ts = 0.0
+
         while True:
             ret, frame = cap.read()
             if not ret:
                 break
             frame_count += 1
 
-            if frame_count % fps_sample != 0:
+            timestamp = frame_count / fps
+            if timestamp + 1e-9 < next_sample_ts:
                 continue
             if max_frames and processed_count >= max_frames:
                 break
 
             features = self.feature_extractor.extract_features(frame)
+            phone_bbox = None
+            if int(features.get("phone_present", 0) or 0) == 1:
+                pf = getattr(self.feature_extractor, "phone_features", {}) or {}
+                if int(pf.get("phone_present", 0) or 0) == 1:
+                    phone_bbox = (
+                        int(pf.get("phone_x1", 0)),
+                        int(pf.get("phone_y1", 0)),
+                        int(pf.get("phone_x2", 0)),
+                        int(pf.get("phone_y2", 0)),
+                    )
+
+            suspicious_events, suspicious_meta = _collect_suspicious_events(
+                features, phone_bbox=phone_bbox
+            )
             result = inference.predict(features)
             xgb_prob = result["fraud_probability"]
 
-            timestamp = frame_count / fps
             frame_analyses.append(
                 FrameAnalysis(
                     frame_id=frame_count,
@@ -105,9 +241,15 @@ class VideoProcessor:
                     exam_id=exam_id,
                     xgboost_probability=float(xgb_prob),
                     frame_image=frame.copy(),
+                    suspicious_events=suspicious_events,
+                    suspicious_meta=suspicious_meta,
                 )
             )
             processed_count += 1
+
+            # Move to the next sample timestamp (handle multiple periods per frame if needed).
+            while next_sample_ts <= timestamp + 1e-9:
+                next_sample_ts += sample_period_s
 
         cap.release()
         report = self._generate_report(frame_analyses, exam_id)
@@ -164,7 +306,12 @@ class VideoProcessor:
             risk_level=risk_level,
             peak_frame_id=peak_frame.frame_id,
             peak_frame_timestamp=round(peak_frame.timestamp, 2),
-            peak_frame_image=peak_frame.frame_image,
+            peak_frame_image=_annotate_peak_frame(
+                peak_frame.frame_image, peak_frame.suspicious_events, peak_frame.suspicious_meta
+            )
+            if peak_frame.frame_image is not None
+            else None,
+            peak_frame_events=peak_frame.suspicious_events,
             total_frames=len(frame_analyses),
             recommendation=recommendation,
         )
@@ -185,6 +332,7 @@ def _build_report_payload(report: ExamReport, frame_analyses: List[FrameAnalysis
         "risk_level": report.risk_level.value,
         "peak_frame_id": report.peak_frame_id,
         "peak_frame_timestamp": report.peak_frame_timestamp,
+        "peak_frame_events": report.peak_frame_events,
         "total_frames": report.total_frames,
         "recommendation": report.recommendation,
         "score_stats": stats,
@@ -404,8 +552,8 @@ def index():
                   <input type="text" id="examId" placeholder="exam_001" value="exam_001">
                 </div>
                 <div class="field">
-                  <label for="fpsSample">FPS Sample</label>
-                  <input type="number" id="fpsSample" value="1" min="1">
+                  <label for="fpsSample">Sample Rate (frames/sec)</label>
+                  <input type="number" id="fpsSample" value="20" min="1">
                 </div>
                 <div class="field">
                   <label for="maxFrames">Max Frames (optional)</label>
@@ -532,8 +680,13 @@ def index():
               });
 
               if (report.peak_frame_image) {
+                const events = Array.isArray(report.peak_frame_events) ? report.peak_frame_events : [];
+                const eventsHtml = events.length
+                  ? `<div style="margin: 10px 0; color: #334155; font-size: 0.95rem;"><strong>Detected:</strong> ${events.join(", ")}</div>`
+                  : "";
                 peakFrame.innerHTML = `
                   <h4>Peak Suspicious Frame</h4>
+                  ${eventsHtml}
                   <img src="data:image/jpeg;base64,${report.peak_frame_image}" alt="Peak Frame">
                 `;
               }
@@ -572,7 +725,7 @@ def predict_video():
         return jsonify({"error": "Invalid file type. Allowed: MP4, AVI, MOV, MKV"}), 400
 
     exam_id = request.form.get("exam_id", "exam_001")
-    fps_sample = int(request.form.get("fps_sample", 1))
+    fps_sample = float(request.form.get("fps_sample", 20))
     max_frames_raw = request.form.get("max_frames", "").strip()
     max_frames = int(max_frames_raw) if max_frames_raw else None
     include_peak_frame = request.form.get("include_peak_frame", "0") == "1"

@@ -144,7 +144,7 @@ def generate_classification_report(prediction_result: dict) -> str:
     label = prediction_result['prediction_label']
     fraud_prob = prediction_result['fraud_probability']
     legit_prob = prediction_result['legitimate_probability']
-    
+
     report = f"""
 === CLASSIFICATION REPORT ===
 
@@ -171,7 +171,7 @@ Interpretation:
 
 @app.route('/health')
 def health():
-    """Health check endpoint"""
+    """Health Check Endpoint"""
     return jsonify({
         'status': 'healthy' if (inference is not None and feature_extractor is not None) else 'models_not_loaded',
         'models_loaded': inference is not None and feature_extractor is not None
@@ -219,7 +219,15 @@ if __name__ == '__main__':
     print("Starting Flask API server...")
     print("Access the web interface at: http://localhost:5000")
     print("API documentation: http://localhost:5000/health")
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print(f"[INFO] PID={os.getpid()} starting Flask dev server...")
+    try:
+        app.run(debug=True, host='127.0.0.1', port=5000, use_reloader=False)
+        print("[ERR] app.run() returned unexpectedly (server stopped).")
+        input("Press Enter to exit...")
+    except Exception as e:
+        import traceback
 
-
-
+        print(f"[ERR] Failed to start server: {e}")
+        traceback.print_exc()
+        raise
+    

@@ -11,10 +11,10 @@ from ultralytics import YOLO
 from mediapipe.tasks import python
 from mediapipe.tasks.python import vision
 import os
+from pathlib import Path
 
-model_dir=r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\src\models"
 class FeatureExtractor:
-    def __init__(self, model_dir: str = r"E:\Projects in ML\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\src\models"):
+    def __init__(self, model_dir: Optional[str] = None):
         """
         Initialize MediaPipe Tasks for feature extraction
         (Face detection, face mesh, hands, pose)
@@ -22,6 +22,14 @@ class FeatureExtractor:
         model_dir:
             Directory containing .task models
         """
+        if model_dir is None:
+            model_dir = str(Path(__file__).resolve().parent / "models")
+
+        if not os.path.isdir(model_dir):
+            raise FileNotFoundError(
+                f"Model directory not found: {model_dir}. "
+                "Pass `model_dir=...` or ensure `src/models` exists."
+            )
 
         # ---------- Face Detection ----------
         face_detector_options = vision.FaceDetectorOptions(
@@ -309,7 +317,7 @@ class FeatureExtractor:
             return features
 
         landmarks = result.face_landmarks[0]
-
+        
         image_points = np.array([
         (landmarks[1].x * width,   landmarks[1].y * height),   # Nose tip
         (landmarks[152].x * width, landmarks[152].y * height), # Chin
@@ -344,7 +352,7 @@ class FeatureExtractor:
         pitch = euler_angles[0][0]
         yaw   = euler_angles[1][0]
         roll  = euler_angles[2][0]
-        
+
         # Normalization
 
         if yaw > 90 :
@@ -401,7 +409,7 @@ class FeatureExtractor:
 
     def _extract_gaze_features(self, rgb_image: np.ndarray, width: int, height: int) -> Dict:
         """Extract gaze-related features"""
-        features = {'gaze_on_script': 0,'gaze_direction': 'None','gazePoint_x': 0,'gazePoint_y': 0,'pupil_left_x': 0,'pupil_left_y': 0,'pupil_right_x': 0,'pupil_right_y': 0} #,'dx':0,'dy':0}
+        features = {'gaze_on_script': 0,'gaze_direction': 'None','gazePoint_x': 0,'gazePoint_y': 0,'pupil_left_x': 0,'pupil_left_y': 0,'pupil_right_x': 0,'pupil_right_y': 0}
         mp_image = mp.Image(image_format=mp.ImageFormat.SRGB,data=rgb_image)
         result = self.face_mesh.detect(mp_image)
 
@@ -513,8 +521,7 @@ class FeatureExtractor:
         features['gaze_direction'] = gaze_direction
 
         # Gaze on script determination using simple heuristics
-
-          # Need to set a proper thresholds for this:-
+        # Need to set a proper thresholds for this:-
         
         if gaze_direction in ['bottom_right', 'bottom_left'] or gaze_point_y > height*0.6:
             features['gaze_on_script'] = 1

@@ -2,6 +2,13 @@
 Unified Flask API for Fraud Detection System
 Combines image upload and feature-based prediction endpoints
 """
+
+from __future__ import annotations
+
+import argparse
+import faulthandler
+import threading
+
 from flask import Flask, request, render_template, jsonify
 from werkzeug.utils import secure_filename
 from flask_cors import CORS
@@ -31,6 +38,7 @@ os.makedirs(app.config['UPLOAD_FOLDER'], exist_ok=True)
 # Global variables for models
 inference = None
 feature_extractor = None
+_model_lock = threading.Lock()
 
 
 def allowed_file(filename):
@@ -44,16 +52,45 @@ def init_models():
     global inference, feature_extractor
     try:
         if os.path.exists(MODEL_PATH) and os.path.exists(PREPROCESSOR_PATH):
+            # Load the lightweight pieces at startup; MediaPipe/YOLO init is heavy,
+            # so keep it lazy to avoid startup crashes and long boot times.
             inference = FraudDetectionInference()
-            feature_extractor = FeatureExtractor()
-            print("✓ Models loaded successfully")
+            feature_extractor = None
+            print("[OK] Inference model loaded successfully")
+            print("[OK] Feature extractor will be initialized lazily on first /predict/image request")
             return True
         else:
-            print("⚠ Warning: Model files not found. Please train the model first.")
+            print("[WARN] Model files not found. Please train the model first.")
             return False
     except Exception as e:
-        print(f"✗ Error loading models: {e}")
+        print(f"[ERR] Error loading models: {e}")
         return False
+
+
+def get_inference() -> FraudDetectionInference:
+    global inference
+    if inference is not None:
+        return inference
+
+    with _model_lock:
+        if inference is not None:
+            return inference
+        if not (os.path.exists(MODEL_PATH) and os.path.exists(PREPROCESSOR_PATH)):
+            raise FileNotFoundError("Model files not found. Please train the model first.")
+        inference = FraudDetectionInference()
+        return inference
+
+
+def get_feature_extractor() -> FeatureExtractor:
+    global feature_extractor
+    if feature_extractor is not None:
+        return feature_extractor
+
+    with _model_lock:
+        if feature_extractor is not None:
+            return feature_extractor
+        feature_extractor = FeatureExtractor()
+        return feature_extractor
 
 
 # Initialize models on startup
@@ -79,10 +116,10 @@ Class Probabilities:
 Interpretation:
 """
     if prediction_result['prediction'] == 1:
-        report += "  ⚠️  FRAUD DETECTED - Suspicious behavior detected in the image.\n"
+        report += "  [WARN] FRAUD DETECTED - Suspicious behavior detected in the image.\n"
         report += "     Please review the exam session for potential violations.\n"
     else:
-        report += "  ✓  LEGITIMATE - No suspicious behavior detected.\n"
+        report += "  [OK] LEGITIMATE - No suspicious behavior detected.\n"
         report += "     The exam session appears normal.\n"
 
     report += "\n=== END REPORT ==="
@@ -90,13 +127,10 @@ Interpretation:
     return report
 
 
-def make_prediction_with_report(features: dict):
+def make_prediction_with_report(inf: FraudDetectionInference, features: dict):
     """Make prediction and generate report from features"""
-    if inference is None:
-        raise ValueError("Models not loaded. Please train the model first.")
-    
     # Make prediction
-    prediction_result = inference.predict(features)
+    prediction_result = inf.predict(features)
     
     # Generate classification report
     report_text = generate_classification_report(prediction_result)
@@ -113,9 +147,13 @@ def index():
 @app.route('/health', methods=['GET'])
 def health():
     """Health check endpoint"""
+    inference_loaded = inference is not None
+    feature_extractor_loaded = feature_extractor is not None
     return jsonify({
-        'status': 'healthy' if (inference is not None and feature_extractor is not None) else 'models_not_loaded',
-        'models_loaded': inference is not None and feature_extractor is not None,
+        'status': 'healthy' if inference_loaded else 'models_not_loaded',
+        'models_loaded': inference_loaded,
+        'inference_loaded': inference_loaded,
+        'feature_extractor_loaded': feature_extractor_loaded,
         'endpoints': {
             'web_interface': '/',
             'image_upload': '/predict/image',
@@ -144,10 +182,10 @@ def predict_from_image():
     if not allowed_file(file.filename):
         return jsonify({'error': 'Invalid file type. Allowed: PNG, JPG, JPEG, GIF, BMP'}), 400
     
-    if inference is None or feature_extractor is None:
-        return jsonify({'error': 'Models not loaded. Please train the model first.'}), 503
-    
     try:
+        inf = get_inference()
+        fe = get_feature_extractor()
+
         # Read image file
         file_bytes = file.read()
         nparr = np.frombuffer(file_bytes, np.uint8)
@@ -157,13 +195,13 @@ def predict_from_image():
             return jsonify({'error': 'Failed to decode image'}), 400
         
         # Extract features from image
-        features = feature_extractor.extract_features(image)
+        features = fe.extract_features(image)
         
         # Make prediction and generate report
-        prediction_result, report_text = make_prediction_with_report(features)
+        prediction_result, report_text = make_prediction_with_report(inf, features)
         
         # Draw annotations on image
-        annotated_image = feature_extractor.draw_annotations(image, features)
+        annotated_image = fe.draw_annotations(image, features)
         
         # Add prediction label to image
         label = prediction_result['prediction_label']
@@ -207,10 +245,9 @@ def predict_from_features():
         ...
     }
     """
-    if inference is None:
-        return jsonify({'error': 'Models not loaded. Please train the model first.'}), 503
-    
     try:
+        inf = get_inference()
+
         # Get JSON data
         if not request.is_json:
             return jsonify({'error': 'Request must be JSON'}), 400
@@ -225,7 +262,7 @@ def predict_from_features():
             return jsonify({'error': 'Features dictionary is empty'}), 400
         
         # Make prediction and generate report
-        prediction_result, report_text = make_prediction_with_report(features)
+        prediction_result, report_text = make_prediction_with_report(inf, features)
         
         return jsonify({
             'success': True,
@@ -257,45 +294,46 @@ def predict_batch():
         ]
     }
     """
-    if inference is None:
-        return jsonify({'error': 'Models not loaded. Please train the model first.'}), 503
-    
     try:
+        inf = get_inference()
+
         # Get JSON data
         if not request.is_json:
             return jsonify({'error': 'Request must be JSON'}), 400
         
         data = request.get_json()
-        
+
         if 'data' not in data:
             return jsonify({'error': 'Missing "data" field. Expected: {"data": [...]}'}), 400
         
         features_list = data['data']
-        
+
         if not isinstance(features_list, list):
             return jsonify({'error': '"data" must be a list of feature dictionaries'}), 400
         
         if len(features_list) == 0:
             return jsonify({'error': 'Features list is empty'}), 400
         
-        # Process each feature set
+        # Process Each Feature Set
+    
         results = []
+
         for idx, features in enumerate(features_list):
             try:
-                prediction_result, report_text = make_prediction_with_report(features)
+                prediction_result, report_text = make_prediction_with_report(inf, features)
                 results.append({
                     'index': idx,
                     'prediction': prediction_result,
                     'classification_report': report_text,
                     'features': features
-                })
+            })
             except Exception as e:
                 results.append({
                     'index': idx,
                     'error': f'Error processing item {idx}: {str(e)}',
                     'features': features
                 })
-        
+
         return jsonify({
             'success': True,
             'count': len(results),
@@ -381,12 +419,53 @@ def api_docs():
 
 
 if __name__ == '__main__':
+    faulthandler.enable()
+
+    parser = argparse.ArgumentParser(description="Unified Flask API for Fraud Detection System")
+    parser.add_argument("--host", type=str, default="127.0.0.1", help="Host to bind (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=5000, help="Port to bind (default: 5000)")
+    parser.add_argument("--debug", action="store_true", help="Enable Flask debug mode")
+    parser.add_argument(
+        "--server",
+        type=str,
+        default="werkzeug",
+        choices=["werkzeug", "wsgiref"],
+        help="Server backend (default: werkzeug). Use wsgiref if Werkzeug hits WinError 6 on Windows.",
+    )
+    args = parser.parse_args()
+
     print("=" * 60)
     print("Fraud Detection System - Unified Flask API")
     print("=" * 60)
-    print("Access the web interface at: http://localhost:5000")
-    print("API documentation: http://localhost:5000/api/docs")
-    print("Health check: http://localhost:5000/health")
+    print(f"Access the web interface at: http://{args.host}:{args.port}")
+    print(f"API documentation: http://{args.host}:{args.port}/api/docs")
+    print(f"Health check: http://{args.host}:{args.port}/health")
     print("=" * 60)
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    print(f"[INFO] PID={os.getpid()} starting server backend={args.server}...", flush=True)
+    # Keep the reloader off to avoid double-start on Windows (and to prevent some
+    # CV/MediaPipe/TFLite initialization issues during reload).
+    try:
+        if args.server == "wsgiref":
+            from wsgiref.simple_server import make_server
+
+            print(f"[INFO] WSGI serving on http://{args.host}:{args.port}", flush=True)
+            httpd = make_server(args.host, args.port, app)
+            httpd.serve_forever()
+        else:
+            # Avoid forcing single-threaded mode here; some Windows setups throw WinError 6
+            # with certain server/selector configurations. Keep Flask defaults.
+            app.run(debug=args.debug, host=args.host, port=args.port, use_reloader=False)
+        print("[ERR] app.run() returned unexpectedly (server stopped).")
+        try:
+            input("Press Enter to exit...")
+        except OSError:
+            pass
+    except Exception as e:
+        import traceback
+
+        print(f"[ERR] Failed to start server: {e}", flush=True)
+        if isinstance(e, OSError) and getattr(e, "winerror", None) == 6 and args.server == "werkzeug":
+            print("[HINT] Try: python api/unified_app.py --server wsgiref", flush=True)
+        traceback.print_exc()
+        raise
 

@@ -3,7 +3,7 @@ import os
 import time
 
 # Create dataset folders
-base_path = "dataset"
+base_path = r"C:\Users\Tharun\Desktop\FRAUD DETECTION SYSTEM FOR THE ONLINE PROCTORED EXAMS\videos"
 os.makedirs(os.path.join(base_path, "0"), exist_ok=True)
 os.makedirs(os.path.join(base_path, "1"), exist_ok=True)
 
@@ -14,7 +14,6 @@ def get_next_filename(label):
 
 def record_clip(duration=10):
     cap = cv2.VideoCapture(0)
-
     if not cap.isOpened():
         print("Error: Cannot access webcam")
         return None
@@ -24,7 +23,6 @@ def record_clip(duration=10):
     out = cv2.VideoWriter(filename, fourcc, 20.0, (640, 480))
 
     start_time = time.time()
-
     print("Recording...")
 
     while int(time.time() - start_time) < duration:
@@ -34,14 +32,12 @@ def record_clip(duration=10):
 
         out.write(frame)
         cv2.imshow("Recording (Press Q to cancel)", frame)
-
         if cv2.waitKey(1) & 0xFF == ord('q'):
             break
-
+        
     cap.release()
     out.release()
     cv2.destroyAllWindows()
-    
     return filename
 
 

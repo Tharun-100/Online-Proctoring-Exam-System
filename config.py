@@ -1,10 +1,13 @@
 """
 Configuration file for the Fraud Detection System
 """
+
 import os
 
 # Dataset path
 DATASET_PATH = "Dataset/Students suspicious behaviors detection dataset_V1.csv"
+
+# DATASET_PATH = "merged_features.csv"
 
 # Model paths
 MODEL_DIR = "models"
@@ -17,12 +20,13 @@ RANDOM_STATE = 42
 VALIDATION_SIZE = 0.2  # From training set
 
 # XGBoost parameters
+
 XGBOOST_PARAMS = {
     'objective': 'binary:logistic',
     'eval_metric': 'logloss',
-    'max_depth': 6,
+    'max_depth': 2,
     'learning_rate': 0.1,
-    'n_estimators': 100,
+    'n_estimators': 2,
     'subsample': 0.8,
     'colsample_bytree': 0.8,
     'random_state': RANDOM_STATE,
@@ -31,8 +35,8 @@ XGBOOST_PARAMS = {
 
 # Feature columns (all except label)
 FEATURE_COLUMNS = None  # Will be set dynamically
-
 # Categorical feature handling
+
 CATEGORICAL_COLUMNS = ['head_pose', 'gaze_direction']
 AUTO_DETECT_CATEGORICALS = True
 

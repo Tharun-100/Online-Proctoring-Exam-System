@@ -1,0 +1,23 @@
+__pycache__/
+*.py[cod]
+*.pyd
+.pytest_cache/
+.ipynb_checkpoints/
+*.tmp
+Thumbs.db
+Desktop.ini
+
+# Local runtime outputs
+runs/
+uploads/
+
+# Large/generated local datasets and videos
+New_setup/
+videos/
+videos_dataset/
+
+# Office lock files
+~$*
+
+# GitHub rejects files over 100 MB
+New_setup/videos_for_extraction/normal/normal_1780217531.mp4
